@@ -1,4 +1,4 @@
-namespace CameraLight;
+namespace CameraLight.Base;
 
 public class IndicatorLightOptions
 {
@@ -7,4 +7,12 @@ public class IndicatorLightOptions
     public string? Off { get; set; }
     public string? Username { get; set; }
     public string? Password { get; set; }
+}
+
+public class HomeBridgeOptions
+{
+    public string? Uuid { get; set; }
+    public string? Username { get; set; }
+    public string? Password { get; set;}
+    public string? BaseUrl { get; set; }
 }

@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Text;
+using CameraLight.Base;
 using Microsoft.Extensions.Options;
 using Serilog;
 
@@ -15,6 +16,7 @@ public class Program
         builder.Logging.AddSerilog(logger);
         builder.Services.AddHostedService<Worker>();
         builder.Services.Configure<IndicatorLightOptions>(builder.Configuration.GetSection("IndicatorLight"));
+        builder.Services.Configure<HomeBridgeOptions>(builder.Configuration.GetSection("HomeBridge"));
         builder.Services.Configure<WindowDetectionOptions>(builder.Configuration.GetSection("WindowDetection"));
         builder.Services.Configure<StateManagerOptions>(builder.Configuration.GetSection("StateManager"));
         builder.Services.AddHttpClient<IndicatorLightService>()
@@ -26,7 +28,16 @@ public class Program
                 httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic",
                     Convert.ToBase64String(Encoding.ASCII.GetBytes($"{username}:{config.Password}")));
             });
+
+        builder.Services.AddHttpClient<HomeBridgeService>()
+            .ConfigureHttpClient((serviceProvider, httpClient) =>
+            {
+                var config = serviceProvider.GetRequiredService<IOptions<HomeBridgeOptions>>().Value;
+                httpClient.BaseAddress = new Uri(config.BaseUrl ?? throw new Exception("BaseUrl is required"));
+            });
+
         builder.Services.AddSingleton<IIndicatorLightService, IndicatorLightService>();
+        builder.Services.AddSingleton<IIndicatorLightService, HomeBridgeService>();
         builder.Services.AddSingleton<ICameraDetectionService, DetectCameraWithWindowsTitlesService>();
         builder.Services.AddSingleton<IStateManager, StateManager>();
 

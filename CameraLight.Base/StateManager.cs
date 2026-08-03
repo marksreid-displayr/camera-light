@@ -1,8 +1,8 @@
 using Microsoft.Extensions.Options;
 
-namespace CameraLight;
+namespace CameraLight.Base;
 
-public class StateManager(IOptions<StateManagerOptions> options, IIndicatorLightService indicatorLightService) : IStateManager
+public class StateManager(IOptions<StateManagerOptions> options, IEnumerable<IIndicatorLightService> indicatorLightService) : IStateManager
 {
     private CancellationTokenSource? _cts;
     private volatile State _currentState = State.Unknown;
@@ -51,11 +51,11 @@ public class StateManager(IOptions<StateManagerOptions> options, IIndicatorLight
                     switch (newState)
                     {
                         case State.On:
-                            await indicatorLightService.TurnOn();
+                            await Task.WhenAll(indicatorLightService.Select(i => i.TurnOn()));
                             _currentState = State.On;
                             break;
                         case State.Off:
-                            await indicatorLightService.TurnOff();
+                            await Task.WhenAll(indicatorLightService.Select(i => i.TurnOff()));
                             _currentState = State.Off;
                             break;
                         case State.Unknown:
@@ -78,4 +78,4 @@ public class StateManager(IOptions<StateManagerOptions> options, IIndicatorLight
             }
         });
     }
-}
+} 

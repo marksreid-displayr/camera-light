@@ -1,4 +1,4 @@
-namespace CameraLight;
+namespace CameraLight.Base;
 
 public interface IStateManager
 {

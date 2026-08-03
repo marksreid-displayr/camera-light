@@ -1,3 +1,5 @@
+using CameraLight.Base;
+
 namespace CameraLight;
 
 // ReSharper disable once SuggestBaseTypeForParameterInConstructor

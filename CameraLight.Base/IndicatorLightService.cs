@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Options;
 
-namespace CameraLight;
+namespace CameraLight.Base;
 
 public class IndicatorLightService(IOptions<IndicatorLightOptions> options, IHttpClientFactory httpClientFactory) : IIndicatorLightService
 {
@@ -18,4 +18,12 @@ public class IndicatorLightService(IOptions<IndicatorLightOptions> options, IHtt
         var client = httpClientFactory.CreateClient(nameof(IndicatorLightService));
         await client.GetAsync(_off);
     }
+}
+
+public class AuthResponse
+{
+    // ReSharper disable once InconsistentNaming
+    public string? access_token { get; set; }
+    public string? TokenType { get; set; }
+    public int ExpiresIn { get; set; }
 }

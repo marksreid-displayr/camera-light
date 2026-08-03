@@ -1,3 +1,5 @@
+using CameraLight.Base;
+
 namespace CameraLight;
 
 public class MockLightService(ILogger<MockLightService> logger) : IIndicatorLightService

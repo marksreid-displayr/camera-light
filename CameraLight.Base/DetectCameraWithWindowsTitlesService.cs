@@ -3,7 +3,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 
-namespace CameraLight;
+namespace CameraLight.Base;
 
 public class DetectCameraWithWindowsTitlesService : ICameraDetectionService
 {
@@ -60,3 +60,4 @@ public class DetectCameraWithWindowsTitlesService : ICameraDetectionService
         return Task.FromResult(isActive);
     }
 }
+
