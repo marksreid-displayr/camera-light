@@ -1,7 +1,10 @@
 using System.Net.Http.Headers;
 using System.Text;
 using CameraLight.Base;
+using Microsoft.Extensions.Http.Resilience;
 using Microsoft.Extensions.Options;
+using Polly;
+using Polly.Retry;
 using Serilog;
 
 namespace CameraLight;
@@ -34,6 +37,17 @@ public class Program
             {
                 var config = serviceProvider.GetRequiredService<IOptions<HomeBridgeOptions>>().Value;
                 httpClient.BaseAddress = new Uri(config.BaseUrl ?? throw new Exception("BaseUrl is required"));
+            })
+            .AddResilienceHandler("HomeBridgeRetry", pipeline =>
+            {
+                pipeline.AddRetry(new HttpRetryStrategyOptions
+                {
+                    MaxRetryAttempts = 4,
+                    Delay = TimeSpan.FromSeconds(1),
+                    BackoffType = DelayBackoffType.Exponential,
+                    UseJitter = true
+                });
+                pipeline.AddTimeout(TimeSpan.FromSeconds(10));
             });
 
         builder.Services.AddSingleton<IIndicatorLightService, IndicatorLightService>();

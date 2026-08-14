@@ -1,8 +1,9 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace CameraLight.Base;
 
-public class StateManager(IOptions<StateManagerOptions> options, IEnumerable<IIndicatorLightService> indicatorLightService) : IStateManager
+public class StateManager(IOptions<StateManagerOptions> options, IEnumerable<IIndicatorLightService> indicatorLightService, ILogger<StateManager> logger) : IStateManager
 {
     private CancellationTokenSource? _cts;
     private volatile State _currentState = State.Unknown;
@@ -45,9 +46,9 @@ public class StateManager(IOptions<StateManagerOptions> options, IEnumerable<IIn
                 {
                     await Task.Delay((int)(_delayMilliseconds - millisecondsSinceLastChange), _cts.Token);
                 }
+                await _lock.WaitAsync(_cts.Token);
                 try
-                {   
-                    await _lock.WaitAsync(_cts.Token);
+                {
                     switch (newState)
                     {
                         case State.On:
@@ -63,16 +64,23 @@ public class StateManager(IOptions<StateManagerOptions> options, IEnumerable<IIn
                         default:
                             throw new ArgumentOutOfRangeException(nameof(newState), newState, null);
                     }
-                    _desiredState = State.Unknown;
-                    _lastStateChange = DateTime.UtcNow;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // Leave _currentState alone so the next ChangeState re-drives the lights.
+                    logger.LogError(ex, "Failed to apply state {State}, will retry", newState);
                 }
                 finally
                 {
+                    // Clearing _desiredState lets an identical ChangeState get through again,
+                    // and stamping the time paces the retry at DelayMilliseconds.
+                    _desiredState = State.Unknown;
+                    _lastStateChange = DateTime.UtcNow;
                     _lock.Release();
                 }
 
             }
-            catch (TaskCanceledException)
+            catch (OperationCanceledException)
             {
                 // Task was canceled, do nothing
             }
