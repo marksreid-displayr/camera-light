@@ -14,8 +14,9 @@ public class HomeBridgeService(IOptions<HomeBridgeOptions> options, IHttpClientF
         var accessToken = await Authenticate();
         var client = httpClientFactory.CreateClient(nameof(HomeBridgeService));
         client.DefaultRequestHeaders.Add("Authorization", $"Bearer {accessToken}");
-        await client.PutAsJsonAsync($"/api/accessories/{options.Value.Uuid}",
+        var response = await client.PutAsJsonAsync($"/api/accessories/{options.Value.Uuid}",
             new { characteristicType = "On", value = state.ToString().ToLower() });
+        response.EnsureSuccessStatusCode();
     }
 
     public async Task TurnOn()
@@ -27,6 +28,7 @@ public class HomeBridgeService(IOptions<HomeBridgeOptions> options, IHttpClientF
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to turn on");
+            throw;
         }
     }
 
@@ -39,6 +41,7 @@ public class HomeBridgeService(IOptions<HomeBridgeOptions> options, IHttpClientF
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to turn off");
+            throw;
         }
     }
 

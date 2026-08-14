@@ -10,13 +10,15 @@ public class IndicatorLightService(IOptions<IndicatorLightOptions> options, IHtt
     public async Task TurnOn()
     {
         var client = httpClientFactory.CreateClient(nameof(IndicatorLightService));
-        await client.GetAsync(_on);
+        var response = await client.GetAsync(_on);
+        response.EnsureSuccessStatusCode();
     }
 
     public async Task TurnOff()
     {
         var client = httpClientFactory.CreateClient(nameof(IndicatorLightService));
-        await client.GetAsync(_off);
+        var response = await client.GetAsync(_off);
+        response.EnsureSuccessStatusCode();
     }
 }
 
