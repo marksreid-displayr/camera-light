@@ -1,89 +1,143 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace CameraLight.Base;
 
-public class StateManager(IOptions<StateManagerOptions> options, IEnumerable<IIndicatorLightService> indicatorLightService, ILogger<StateManager> logger) : IStateManager
+public class StateManager(IOptions<StateManagerOptions> options, IEnumerable<IIndicatorLightService> indicatorLightServices, ILogger<StateManager> logger) : IStateManager
 {
-    private CancellationTokenSource? _cts;
-    private volatile State _currentState = State.Unknown;
-    private volatile State _desiredState = State.Unknown;
-    private readonly SemaphoreSlim _lock = new(1, 1);
-    private readonly long _delayMilliseconds = options.Value.DelayMilliseconds ?? throw new Exception("DelayMilliseconds should not be empty");
-    private DateTime _lastStateChange = DateTime.MinValue;
+    private const int MaxRetryDelayMilliseconds = 5 * 60 * 1000;
+    private const int MaxBackoffDoublings = 6;
 
+    private readonly IIndicatorLightService[] _lights = indicatorLightServices.ToArray();
+    private readonly int _delayMilliseconds = (int)(options.Value.DelayMilliseconds ?? throw new Exception("DelayMilliseconds should not be empty"));
+
+    // What the Worker last asked for. Written by the Worker thread, read by the applier.
+    private volatile State _requestedState = State.Unknown;
+
+    // What each light is believed to be showing. A light that threw is removed so it gets re-driven.
+    private readonly ConcurrentDictionary<IIndicatorLightService, State> _appliedPerLight = new();
+
+    // Gate ensuring only one applier loop runs at a time. 0 = idle, 1 = running.
+    private int _applierRunning;
+
+    private DateTime _lastApply = DateTime.MinValue;
+    private int _consecutiveFailures;
+
+    /// <summary>
+    /// Records the state the lights should be in. Never blocks: the Worker ticks once a second and
+    /// must not be held up by a light that is slow or unreachable.
+    /// </summary>
     public void ChangeState(State newState)
+    {
+        _requestedState = newState;
+        EnsureApplierRunning();
+    }
+
+    private void EnsureApplierRunning()
+    {
+        if (Interlocked.CompareExchange(ref _applierRunning, 1, 0) != 0)
+        {
+            return;
+        }
+        _ = Task.Run(ApplyLoop);
+    }
+
+    private async Task ApplyLoop()
     {
         try
         {
-            _lock.Wait();
-            if (_desiredState == newState)
+            while (HasWorkToDo())
             {
-                return;
-            }
+                // Pace changes so a window title that flaps doesn't strobe the lights, and so a
+                // failing light retries on a widening interval instead of hammering every tick.
+                var wait = _consecutiveFailures == 0
+                    ? _delayMilliseconds
+                    : Math.Min(_delayMilliseconds * (1 << Math.Min(_consecutiveFailures, MaxBackoffDoublings)), MaxRetryDelayMilliseconds);
+                var sinceLastApply = (long)(DateTime.UtcNow - _lastApply).TotalMilliseconds;
+                if (sinceLastApply < wait)
+                {
+                    await Task.Delay((int)(wait - sinceLastApply));
+                }
 
-            _cts?.Cancel();
-            _cts?.Dispose();
-            _cts = null;
-            if (_currentState == newState)
-            {
-                return;
-            }
+                // Re-read: the requested state may have flipped back while we were waiting.
+                var target = _requestedState;
+                if (target == State.Unknown)
+                {
+                    return;
+                }
 
-            _desiredState = newState;
+                _lastApply = DateTime.UtcNow;
+                if (await Apply(target))
+                {
+                    _consecutiveFailures = 0;
+                }
+                else
+                {
+                    _consecutiveFailures++;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Indicator light applier loop failed unexpectedly");
         }
         finally
         {
-            _lock.Release();
+            Interlocked.Exchange(ref _applierRunning, 0);
+            // A ChangeState that landed while the gate was held would otherwise be dropped.
+            if (HasWorkToDo())
+            {
+                EnsureApplierRunning();
+            }
         }
-        _cts = new CancellationTokenSource();
-        Task.Run(async () =>
+    }
+
+    private bool HasWorkToDo()
+    {
+        var target = _requestedState;
+        return target != State.Unknown
+               && _lights.Any(light => !_appliedPerLight.TryGetValue(light, out var applied) || applied != target);
+    }
+
+    /// <summary>
+    /// Drives every light that isn't already showing <paramref name="target"/>. Each light is
+    /// isolated, so one unreachable light neither blocks nor fails the others.
+    /// </summary>
+    private async Task<bool> Apply(State target)
+    {
+        var results = await Task.WhenAll(_lights.Select(async light =>
         {
+            if (_appliedPerLight.TryGetValue(light, out var applied) && applied == target)
+            {
+                return true;
+            }
+
             try
             {
-                var millisecondsSinceLastChange = (long)(DateTime.UtcNow - _lastStateChange).TotalMilliseconds;
-                if (millisecondsSinceLastChange < _delayMilliseconds)
+                switch (target)
                 {
-                    await Task.Delay((int)(_delayMilliseconds - millisecondsSinceLastChange), _cts.Token);
+                    case State.On:
+                        await light.TurnOn();
+                        break;
+                    case State.Off:
+                        await light.TurnOff();
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(target), target, null);
                 }
-                await _lock.WaitAsync(_cts.Token);
-                try
-                {
-                    switch (newState)
-                    {
-                        case State.On:
-                            await Task.WhenAll(indicatorLightService.Select(i => i.TurnOn()));
-                            _currentState = State.On;
-                            break;
-                        case State.Off:
-                            await Task.WhenAll(indicatorLightService.Select(i => i.TurnOff()));
-                            _currentState = State.Off;
-                            break;
-                        case State.Unknown:
-                            break;
-                        default:
-                            throw new ArgumentOutOfRangeException(nameof(newState), newState, null);
-                    }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    // Leave _currentState alone so the next ChangeState re-drives the lights.
-                    logger.LogError(ex, "Failed to apply state {State}, will retry", newState);
-                }
-                finally
-                {
-                    // Clearing _desiredState lets an identical ChangeState get through again,
-                    // and stamping the time paces the retry at DelayMilliseconds.
-                    _desiredState = State.Unknown;
-                    _lastStateChange = DateTime.UtcNow;
-                    _lock.Release();
-                }
-
+                _appliedPerLight[light] = target;
+                return true;
             }
-            catch (OperationCanceledException)
+            catch (Exception ex)
             {
-                // Task was canceled, do nothing
+                // Forget the last known state so the next pass re-drives this light.
+                _appliedPerLight.TryRemove(light, out _);
+                logger.LogError(ex, "{Light} failed to apply state {State}, will retry", light.GetType().Name, target);
+                return false;
             }
-        });
+        }));
+
+        return results.All(applied => applied);
     }
-} 
+}

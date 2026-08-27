@@ -30,6 +30,18 @@ public class Program
                 var username = config.Username ?? throw new Exception("Username is required");
                 httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic",
                     Convert.ToBase64String(Encoding.ASCII.GetBytes($"{username}:{config.Password}")));
+            })
+            .AddResilienceHandler("IndicatorLightRetry", pipeline =>
+            {
+                pipeline.AddRetry(new HttpRetryStrategyOptions
+                {
+                    MaxRetryAttempts = 4,
+                    Delay = TimeSpan.FromSeconds(1),
+                    BackoffType = DelayBackoffType.Exponential,
+                    UseJitter = true
+                });
+                // The bulb is on the LAN: if it hasn't answered in 5s it isn't going to.
+                pipeline.AddTimeout(TimeSpan.FromSeconds(5));
             });
 
         builder.Services.AddHttpClient<HomeBridgeService>()
