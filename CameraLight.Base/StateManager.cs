@@ -4,25 +4,48 @@ using Microsoft.Extensions.Options;
 
 namespace CameraLight.Base;
 
-public class StateManager(IOptions<StateManagerOptions> options, IEnumerable<IIndicatorLightService> indicatorLightServices, ILogger<StateManager> logger) : IStateManager
+public class StateManager(
+    IOptionsMonitor<StateManagerOptions> options,
+    IEnumerable<IIndicatorLightService> indicatorLightServices,
+    IEventLog eventLog,
+    ILogger<StateManager> logger) : IStateManager
 {
     private const int MaxRetryDelayMilliseconds = 5 * 60 * 1000;
     private const int MaxBackoffDoublings = 6;
 
     private readonly IIndicatorLightService[] _lights = indicatorLightServices.ToArray();
-    private readonly int _delayMilliseconds = (int)(options.Value.DelayMilliseconds ?? throw new Exception("DelayMilliseconds should not be empty"));
 
     // What the Worker last asked for. Written by the Worker thread, read by the applier.
     private volatile State _requestedState = State.Unknown;
 
+    // Set from the tray menu when a light is stuck on and the user wants it off now.
+    private volatile bool _forcedOff;
+
     // What each light is believed to be showing. A light that threw is removed so it gets re-driven.
     private readonly ConcurrentDictionary<IIndicatorLightService, State> _appliedPerLight = new();
+
+    // Why each failing light last failed, so the status window can say more than "something broke".
+    private readonly ConcurrentDictionary<string, string> _failures = new();
 
     // Gate ensuring only one applier loop runs at a time. 0 = idle, 1 = running.
     private int _applierRunning;
 
     private DateTime _lastApply = DateTime.MinValue;
     private int _consecutiveFailures;
+    private DateTime? _nextAttempt;
+
+    public event EventHandler<LightStatus>? StatusChanged;
+
+    private int DelayMilliseconds =>
+        (int)(options.CurrentValue.DelayMilliseconds ?? throw new Exception("DelayMilliseconds should not be empty"));
+
+    public LightStatus Status => new(
+        _requestedState,
+        AppliedState(),
+        _forcedOff,
+        _failures.ToDictionary(failure => failure.Key, failure => failure.Value),
+        _consecutiveFailures,
+        _nextAttempt is { } next ? new DateTimeOffset(next, TimeSpan.Zero).ToLocalTime() : null);
 
     /// <summary>
     /// Records the state the lights should be in. Never blocks: the Worker ticks once a second and
@@ -30,8 +53,48 @@ public class StateManager(IOptions<StateManagerOptions> options, IEnumerable<IIn
     /// </summary>
     public void ChangeState(State newState)
     {
+        var changed = _requestedState != newState;
         _requestedState = newState;
         EnsureApplierRunning();
+        if (changed)
+        {
+            RaiseStatusChanged();
+        }
+    }
+
+    public void SetForcedOff(bool forcedOff)
+    {
+        if (_forcedOff == forcedOff)
+        {
+            return;
+        }
+
+        _forcedOff = forcedOff;
+        eventLog.Append(new UsageEvent(DateTimeOffset.Now,
+            forcedOff ? UsageEventKind.ForcedOff : UsageEventKind.Resumed));
+        logger.LogInformation("Manual override {State}", forcedOff ? "engaged" : "released");
+
+        // Don't make the user wait out a backoff or the pacing delay for a light they want off now.
+        _consecutiveFailures = 0;
+        _lastApply = DateTime.MinValue;
+        EnsureApplierRunning();
+        RaiseStatusChanged();
+    }
+
+    private State EffectiveTarget => _forcedOff ? State.Off : _requestedState;
+
+    private State AppliedState()
+    {
+        if (_lights.Length == 0)
+        {
+            return State.Unknown;
+        }
+
+        var states = _lights
+            .Select(light => _appliedPerLight.TryGetValue(light, out var applied) ? applied : State.Unknown)
+            .Distinct()
+            .ToArray();
+        return states.Length == 1 ? states[0] : State.Unknown;
     }
 
     private void EnsureApplierRunning()
@@ -49,25 +112,29 @@ public class StateManager(IOptions<StateManagerOptions> options, IEnumerable<IIn
         {
             while (HasWorkToDo())
             {
-                // Pace changes so a window title that flaps doesn't strobe the lights, and so a
-                // failing light retries on a widening interval instead of hammering every tick.
+                // Pace changes so a camera that flaps doesn't strobe the lights, and so a failing
+                // light retries on a widening interval instead of hammering every tick.
+                var delay = DelayMilliseconds;
                 var wait = _consecutiveFailures == 0
-                    ? _delayMilliseconds
-                    : Math.Min(_delayMilliseconds * (1 << Math.Min(_consecutiveFailures, MaxBackoffDoublings)), MaxRetryDelayMilliseconds);
+                    ? delay
+                    : Math.Min(delay * (1 << Math.Min(_consecutiveFailures, MaxBackoffDoublings)), MaxRetryDelayMilliseconds);
                 var sinceLastApply = (long)(DateTime.UtcNow - _lastApply).TotalMilliseconds;
                 if (sinceLastApply < wait)
                 {
+                    _nextAttempt = _lastApply.AddMilliseconds(wait);
+                    RaiseStatusChanged();
                     await Task.Delay((int)(wait - sinceLastApply));
                 }
 
                 // Re-read: the requested state may have flipped back while we were waiting.
-                var target = _requestedState;
+                var target = EffectiveTarget;
                 if (target == State.Unknown)
                 {
                     return;
                 }
 
                 _lastApply = DateTime.UtcNow;
+                _nextAttempt = null;
                 if (await Apply(target))
                 {
                     _consecutiveFailures = 0;
@@ -76,6 +143,7 @@ public class StateManager(IOptions<StateManagerOptions> options, IEnumerable<IIn
                 {
                     _consecutiveFailures++;
                 }
+                RaiseStatusChanged();
             }
         }
         catch (Exception ex)
@@ -95,7 +163,7 @@ public class StateManager(IOptions<StateManagerOptions> options, IEnumerable<IIn
 
     private bool HasWorkToDo()
     {
-        var target = _requestedState;
+        var target = EffectiveTarget;
         return target != State.Unknown
                && _lights.Any(light => !_appliedPerLight.TryGetValue(light, out var applied) || applied != target);
     }
@@ -106,6 +174,8 @@ public class StateManager(IOptions<StateManagerOptions> options, IEnumerable<IIn
     /// </summary>
     private async Task<bool> Apply(State target)
     {
+        var changed = 0;
+
         var results = await Task.WhenAll(_lights.Select(async light =>
         {
             if (_appliedPerLight.TryGetValue(light, out var applied) && applied == target)
@@ -127,17 +197,30 @@ public class StateManager(IOptions<StateManagerOptions> options, IEnumerable<IIn
                         throw new ArgumentOutOfRangeException(nameof(target), target, null);
                 }
                 _appliedPerLight[light] = target;
+                _failures.TryRemove(light.Name, out _);
+                Interlocked.Increment(ref changed);
                 return true;
             }
             catch (Exception ex)
             {
                 // Forget the last known state so the next pass re-drives this light.
                 _appliedPerLight.TryRemove(light, out _);
-                logger.LogError(ex, "{Light} failed to apply state {State}, will retry", light.GetType().Name, target);
+                _failures[light.Name] = ex.Message;
+                logger.LogError(ex, "{Light} failed to apply state {State}, will retry", light.Name, target);
+                eventLog.Append(new UsageEvent(DateTimeOffset.Now, UsageEventKind.LightFailed,
+                    Detail: $"{light.Name}: {ex.Message}"));
                 return false;
             }
         }));
 
+        if (changed > 0)
+        {
+            eventLog.Append(new UsageEvent(DateTimeOffset.Now,
+                target == State.On ? UsageEventKind.LightOn : UsageEventKind.LightOff));
+        }
+
         return results.All(applied => applied);
     }
+
+    private void RaiseStatusChanged() => StatusChanged?.Invoke(this, Status);
 }
