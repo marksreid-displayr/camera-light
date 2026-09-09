@@ -20,7 +20,7 @@ public class Program
         builder.Services.AddHostedService<Worker>();
         builder.Services.Configure<IndicatorLightOptions>(builder.Configuration.GetSection("IndicatorLight"));
         builder.Services.Configure<HomeBridgeOptions>(builder.Configuration.GetSection("HomeBridge"));
-        builder.Services.Configure<WindowDetectionOptions>(builder.Configuration.GetSection("WindowDetection"));
+        builder.Services.Configure<WebcamDetectionOptions>(builder.Configuration.GetSection("WebcamDetection"));
         builder.Services.Configure<StateManagerOptions>(builder.Configuration.GetSection("StateManager"));
         builder.Services.AddHttpClient<IndicatorLightService>()
             .ConfigureHttpClient((serviceProvider, httpClient) =>
@@ -64,7 +64,7 @@ public class Program
 
         builder.Services.AddSingleton<IIndicatorLightService, IndicatorLightService>();
         builder.Services.AddSingleton<IIndicatorLightService, HomeBridgeService>();
-        builder.Services.AddSingleton<ICameraDetectionService, DetectCameraWithWindowsTitlesService>();
+        builder.Services.AddSingleton<ICameraDetectionService, DetectCameraWithConsentStoreService>();
         builder.Services.AddSingleton<IStateManager, StateManager>();
 
         var host = builder.Build();
