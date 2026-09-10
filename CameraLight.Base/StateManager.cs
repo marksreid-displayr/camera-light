@@ -64,15 +64,23 @@ public class StateManager(
 
     public void SetForcedOff(bool forcedOff)
     {
-        if (_forcedOff == forcedOff)
+        var changed = _forcedOff != forcedOff;
+        _forcedOff = forcedOff;
+
+        if (forcedOff)
         {
-            return;
+            // The believed state can be a lie: HomeBridge accepts an off, returns 200, and the bulb
+            // stays on. Forget it so the off is really sent, including when the override is already
+            // engaged and the user is asking a second time because the light is still on.
+            _appliedPerLight.Clear();
         }
 
-        _forcedOff = forcedOff;
-        eventLog.Append(new UsageEvent(DateTimeOffset.Now,
-            forcedOff ? UsageEventKind.ForcedOff : UsageEventKind.Resumed));
-        logger.LogInformation("Manual override {State}", forcedOff ? "engaged" : "released");
+        if (changed)
+        {
+            eventLog.Append(new UsageEvent(DateTimeOffset.Now,
+                forcedOff ? UsageEventKind.ForcedOff : UsageEventKind.Resumed));
+            logger.LogInformation("Manual override {State}", forcedOff ? "engaged" : "released");
+        }
 
         // Don't make the user wait out a backoff or the pacing delay for a light they want off now.
         _consecutiveFailures = 0;

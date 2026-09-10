@@ -85,7 +85,8 @@ public sealed class StatusForm : TrayForm
                     .Append(status.NextAttemptAt is { } next ? $"Next attempt at {next:HH:mm:ss}" : "Retrying"))
             : "None";
 
-        _forceOff.Enabled = !status.ForcedOff;
+        // Always enabled: a light that is still on after an off needs the command sent again.
+        _forceOff.Enabled = true;
         _resume.Enabled = status.ForcedOff;
     }
 

@@ -20,6 +20,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly TrayIcons _icons = new();
     private readonly NotifyIcon _notifyIcon;
     private readonly ToolStripMenuItem _forceOff;
+    private readonly ToolStripMenuItem _resume;
     private readonly Control _marshal = new();
 
     private StatusForm? _status;
@@ -42,9 +43,16 @@ public sealed class TrayApplicationContext : ApplicationContext
         // Forces the handle so background threads have something to marshal onto from the start.
         _ = _marshal.Handle;
 
-        _forceOff = new ToolStripMenuItem("Turn lights off now", null, (_, _) => ToggleForcedOff())
+        // Kept separate from the resume item so a light that is still on can be told off again,
+        // rather than the only click available flipping the override back to automatic.
+        _forceOff = new ToolStripMenuItem("Turn lights off now", null, (_, _) => _stateManager.SetForcedOff(true))
         {
             CheckOnClick = false
+        };
+        _resume = new ToolStripMenuItem("Resume automatic", null, (_, _) => _stateManager.SetForcedOff(false))
+        {
+            CheckOnClick = false,
+            Visible = false
         };
 
         var menu = new ContextMenuStrip();
@@ -53,6 +61,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(new ToolStripMenuItem("Settings", null, (_, _) => ShowSettings()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_forceOff);
+        menu.Items.Add(_resume);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Open settings folder", null, (_, _) => OpenSettingsFolder()));
         menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => Exit()));
@@ -102,11 +111,9 @@ public sealed class TrayApplicationContext : ApplicationContext
         var status = _stateManager.Status;
         _notifyIcon.Icon = _icons.For(status);
         _notifyIcon.Text = TrayText.Tooltip(status, _usageMonitor.Current);
-        _forceOff.Text = status.ForcedOff ? "Resume automatic" : "Turn lights off now";
         _forceOff.Checked = status.ForcedOff;
+        _resume.Visible = status.ForcedOff;
     }
-
-    private void ToggleForcedOff() => _stateManager.SetForcedOff(!_stateManager.Status.ForcedOff);
 
     private void ShowStatus()
     {
