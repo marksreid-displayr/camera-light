@@ -35,6 +35,11 @@ public class Program
         builder.Services.Configure<HomeBridgeOptions>(builder.Configuration.GetSection("HomeBridge"));
         builder.Services.Configure<DetectionOptions>(builder.Configuration.GetSection("Detection"));
         builder.Services.Configure<StateManagerOptions>(builder.Configuration.GetSection("StateManager"));
+        builder.Services.Configure<DnsOptions>(builder.Configuration.GetSection("Dns"));
+
+        // On the VPN the system resolver often can't answer for names outside the corporate
+        // network, so both clients resolve through our own resolver instead of the socket layer's.
+        builder.Services.AddSingleton<IDnsResolver, FallbackDnsResolver>();
 
         builder.Services.AddHttpClient(nameof(IndicatorLightService))
             .ConfigureHttpClient((serviceProvider, httpClient) =>
@@ -45,6 +50,7 @@ public class Program
                 httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic",
                     Convert.ToBase64String(Encoding.ASCII.GetBytes($"{username}:{config.Password}")));
             })
+            .UseFallbackDns()
             .AddResilienceHandler("IndicatorLightRetry", pipeline =>
             {
                 pipeline.AddRetry(new HttpRetryStrategyOptions
@@ -64,6 +70,7 @@ public class Program
                 var config = serviceProvider.GetRequiredService<IOptions<HomeBridgeOptions>>().Value;
                 httpClient.BaseAddress = new Uri(config.BaseUrl ?? throw new Exception("BaseUrl is required"));
             })
+            .UseFallbackDns()
             .AddResilienceHandler("HomeBridgeRetry", pipeline =>
             {
                 pipeline.AddRetry(new HttpRetryStrategyOptions
