@@ -2,7 +2,9 @@
 
 CameraLight detects when an application is using your webcam (by reading the Windows Capability
 Access Manager consent store) and activates a smart bulb. This visual indicator informs observers
-that you're in a meeting, preventing interruptions.
+that you're in a meeting, preventing interruptions. While the webcam is in use, CameraLight also
+keeps the display active so the screen saver, inactivity lock, and display power-off do not
+interrupt the call.
 
 It runs as a system tray app: the icon shows what the lights are doing, and the menu behind it gives
 you a status window, a history of everything that triggered the lights, settings, and a manual off
@@ -84,3 +86,5 @@ the same lights: either one is enough to turn them on.
 Apps that should never turn the lights on are listed under `Detection:IgnoredApps`, matched as
 case-insensitive substrings of the app's consent store identity. Windows Hello face unlock counts as
 camera use, so it is the usual first entry — open **History**, find the row, and right-click it.
+Ignored apps also do not keep the display active. Microphone-only activity never keeps the display
+active, even when microphone monitoring is enabled.

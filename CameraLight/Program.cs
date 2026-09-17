@@ -102,6 +102,7 @@ public class Program
         builder.Services.AddSingleton<IEventLog, UsageEventLog>();
         builder.Services.AddSingleton<UserSettingsStore>();
         builder.Services.AddSingleton<IStateManager, StateManager>();
+        builder.Services.AddSingleton<IDisplayIdleBlocker, DisplayIdleBlocker>();
 
         // One instance wearing both hats: the loop that polls, and the thing the UI reads from.
         builder.Services.AddSingleton<UsageMonitor>();

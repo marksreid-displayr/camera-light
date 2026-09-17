@@ -8,10 +8,11 @@ namespace CameraLight;
 /// whenever anything is left. Also keeps the record of what started and stopped, which is the only
 /// thing the history window and the tray tooltip have to go on.
 /// </summary>
-public class UsageMonitor(
+internal sealed class UsageMonitor(
     IEnumerable<IDeviceUsageDetector> detectors,
     IOptionsMonitor<DetectionOptions> options,
     IStateManager stateManager,
+    IDisplayIdleBlocker displayIdleBlocker,
     IEventLog eventLog,
     ILogger<UsageMonitor> logger) : BackgroundService, IUsageMonitor
 {
@@ -90,6 +91,7 @@ public class UsageMonitor(
 
         Record(inUse);
         stateManager.ChangeState(inUse.Count > 0 ? State.On : State.Off);
+        displayIdleBlocker.SetBlocked(inUse.Values.Any(usage => usage.Kind == DeviceKind.Camera));
     }
 
     private void Record(Dictionary<string, DeviceUsage> inUse)
