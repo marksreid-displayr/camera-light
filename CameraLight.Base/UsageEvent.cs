@@ -31,8 +31,8 @@ public record UsageEvent(
     {
         UsageEventKind.Started => $"{Device} in use by {DisplayName}",
         UsageEventKind.Stopped => $"{Device} released by {DisplayName}",
-        UsageEventKind.LightOn => "Lights on",
-        UsageEventKind.LightOff => "Lights off",
+        UsageEventKind.LightOn => Detail is null ? "Lights on" : $"{Detail} on",
+        UsageEventKind.LightOff => Detail is null ? "Lights off" : $"{Detail} off",
         UsageEventKind.LightFailed => $"Light unreachable: {Detail}",
         UsageEventKind.ForcedOff => "Turned off manually",
         UsageEventKind.Resumed => "Automatic control resumed",

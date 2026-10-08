@@ -15,8 +15,15 @@ public class HomeBridgeService(IOptions<HomeBridgeOptions> options, IHttpClientF
         var client = httpClientFactory.CreateClient(nameof(HomeBridgeService));
         client.DefaultRequestHeaders.Add("Authorization", $"Bearer {accessToken}");
         var response = await client.PutAsJsonAsync($"/api/accessories/{options.Value.Uuid}",
-            new { characteristicType = "On", value = state.ToString().ToLower() });
-        response.EnsureSuccessStatusCode();
+            new { characteristicType = "On", value = state });
+        if (!response.IsSuccessStatusCode)
+        {
+            // HomeBridge explains a 400 in the body; without it the log only says "Bad Request".
+            var body = await response.Content.ReadAsStringAsync();
+            throw new HttpRequestException(
+                $"HomeBridge returned {(int)response.StatusCode} ({response.ReasonPhrase}): {body}",
+                null, response.StatusCode);
+        }
     }
 
     public async Task TurnOn()
