@@ -90,8 +90,14 @@ public class Program
         }
         else
         {
-            builder.Services.AddSingleton<IIndicatorLightService, IndicatorLightService>();
-            builder.Services.AddSingleton<IIndicatorLightService, HomeBridgeService>();
+            if (builder.Configuration.GetValue("IndicatorLight:Enabled", true))
+            {
+                builder.Services.AddSingleton<IIndicatorLightService, IndicatorLightService>();
+            }
+            if (builder.Configuration.GetValue("HomeBridge:Enabled", true))
+            {
+                builder.Services.AddSingleton<IIndicatorLightService, HomeBridgeService>();
+            }
         }
 
         builder.Services.AddSingleton<IDeviceUsageDetector>(serviceProvider => new ConsentStoreDetector(

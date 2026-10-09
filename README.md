@@ -31,7 +31,7 @@ CameraLight is a dotnet10 tray app for Windows. To install:
 |---|---|
 | Grey | The lights are off. |
 | Red | The lights are on: something is holding the camera (or the microphone, if you have turned that on). |
-| Amber | A light is unreachable. CameraLight keeps retrying on a widening interval. |
+| Amber | A light is unreachable. CameraLight keeps retrying it on a widening interval; the other light carries on as normal. |
 | Grey, crossed out | You have held the lights off from the menu. |
 
 The tooltip names the app that triggered them. Left-clicking opens the status window.
@@ -59,7 +59,8 @@ install folder never takes them with it:
 - `history.jsonl` — one JSON object per event, capped at 2 MB with a single `.1` backup. The last
   500 events are reloaded at startup.
 
-Light addresses and credentials stay in `appsettings.json` and are not exposed in the UI. The
+Light addresses and credentials stay in `appsettings.json` and are not exposed in the UI. Set
+`"Enabled": false` under `IndicatorLight` or `HomeBridge` to leave that light out entirely. The
 diagnostic log is still Serilog's, at `c:\logs\cameralight\cameralight.log`.
 
 ## Detection
